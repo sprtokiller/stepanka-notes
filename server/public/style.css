@@ -50,8 +50,7 @@ body.can-pan #world { cursor: grab; }
 /* ── cards ── */
 .card {
   position: absolute;
-  min-width: 180px;
-  max-width: 280px;
+  width: 230px;
   background: var(--card);
   border: 1px solid var(--card-edge);
   border-radius: 14px;

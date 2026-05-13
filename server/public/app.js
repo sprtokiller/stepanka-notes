@@ -278,6 +278,76 @@ function makeCardEl(card) {
     drag = null;
   });
 
+  /* ── touch drag ─────────────────────────────────────────────── */
+  let touchDrag    = null;
+  let touchPending = null;
+  const LONG_PRESS_MS = 350;
+  const CANCEL_DIST   = 8;
+
+  const cancelTouchDrag = () => {
+    if (touchPending) { clearTimeout(touchPending.timer); touchPending = null; }
+    if (touchDrag)    { el.classList.remove('dragging'); touchDrag = null; }
+  };
+
+  el.addEventListener('touchstart', e => {
+    if (el.classList.contains('editing')) return;
+    if (e.target.closest('.del-x') || e.target.closest('.pin')) return;
+    if (e.touches.length > 1) { cancelTouchDrag(); return; }
+    const touch = e.touches[0];
+    const sx = touch.clientX, sy = touch.clientY;
+    if (touchPending) clearTimeout(touchPending.timer);
+    touchPending = {
+      sx, sy,
+      timer: setTimeout(() => {
+        touchPending = null;
+        touchDrag = { ox: card.x, oy: card.y, sx, sy };
+        el.classList.add('dragging');
+        bringToFront(el, card);
+        navigator.vibrate?.(30);
+      }, LONG_PRESS_MS),
+    };
+  }, { passive: true });
+
+  el.addEventListener('touchmove', e => {
+    if (e.touches.length > 1) { cancelTouchDrag(); return; }
+    const touch = e.touches[0];
+    if (!touch) return;
+    if (touchPending) {
+      if (Math.hypot(touch.clientX - touchPending.sx, touch.clientY - touchPending.sy) > CANCEL_DIST) {
+        clearTimeout(touchPending.timer);
+        touchPending = null;
+      }
+      return;
+    }
+    if (!touchDrag) return;
+    e.preventDefault();
+    card.x = touchDrag.ox + (touch.clientX - touchDrag.sx) / state.scale;
+    card.y = touchDrag.oy + (touch.clientY - touchDrag.sy) / state.scale;
+    el.style.left = card.x + 'px';
+    el.style.top  = card.y + 'px';
+    if (wsConn && wsConn.readyState === 1 && !isTempId(card.id)) {
+      const now = Date.now();
+      if (!touchDrag.lastSent || now - touchDrag.lastSent >= 50) {
+        touchDrag.lastSent = now;
+        wsConn.send(JSON.stringify({ event: 'card:moved', clientId, id: card.id, x: card.x, y: card.y }));
+      }
+    }
+  }, { passive: false });
+
+  el.addEventListener('touchend', () => {
+    if (touchPending) { clearTimeout(touchPending.timer); touchPending = null; return; }
+    if (!touchDrag) return;
+    el.classList.remove('dragging');
+    if (!isTempId(card.id)) {
+      apiFetch('PUT', `/api/cards/${card.id}`, {
+        text: card.text, x: card.x, y: card.y, rot: card.rot, sort_order: card.sort_order || 0,
+      }).catch(() => {});
+    }
+    touchDrag = null;
+  });
+
+  el.addEventListener('touchcancel', cancelTouchDrag);
+
   const pin = el.querySelector('.pin');
   pin.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
@@ -678,9 +748,17 @@ function centerOnCards() {
     maxX = Math.max(maxX, c.x + 230);
     maxY = Math.max(maxY, c.y + 90);
   }
+  const W = window.innerWidth, H = window.innerHeight;
+  const PAD = 60;
+  const scaleToFit = Math.min(
+    (W - PAD * 2) / (maxX - minX),
+    (H - PAD * 2) / (maxY - minY),
+    1,
+  );
+  state.scale = Math.max(0.25, scaleToFit);
   state.pan = {
-    x: window.innerWidth  / 2 - (minX + maxX) / 2 * state.scale,
-    y: window.innerHeight / 2 - (minY + maxY) / 2 * state.scale,
+    x: W / 2 - (minX + maxX) / 2 * state.scale,
+    y: H / 2 - (minY + maxY) / 2 * state.scale,
   };
 }
 
