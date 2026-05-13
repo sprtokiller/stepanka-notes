@@ -236,7 +236,7 @@ body.can-pan #world { cursor: grab; }
 /* ── login screen ── */
 #login-screen {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(251, 247, 238, 0.96);
+  background: var(--paper);
   display: flex; align-items: center; justify-content: center;
   transition: opacity 0.4s ease;
 }

@@ -765,6 +765,11 @@ function centerOnCards() {
 /* ── load state and render ─────────────────────────────────── */
 async function loadAndRender() {
   const data = await apiFetch('GET', '/api/state');
+  if (data.meta) {
+    document.querySelector('.logo-name-a').textContent = data.meta.nameA;
+    document.querySelector('.logo-name-b').textContent = data.meta.nameB;
+    document.querySelector('.logo-sub').textContent    = data.meta.sub;
+  }
   state.cards = data.cards;
   state.connections = data.connections || [];
   sortCounter = state.cards.reduce((m, c) => Math.max(m, c.sort_order || 0), 0);

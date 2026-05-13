@@ -117,7 +117,7 @@ app.get('/api/state', requireAuth, (req, res) => {
   ).all();
   const pan = db.prepare('SELECT x, y FROM pan WHERE id = 1').get();
   const connections = db.prepare('SELECT id, from_id, to_id FROM connections').all();
-  res.json({ cards, pan: pan || { x: 0, y: 0 }, connections });
+  res.json({ cards, pan: pan || { x: 0, y: 0 }, connections, meta: { nameA: 'Štěpánka', nameB: 'Víťa', sub: 'místo na slova mezi námi' } });
 });
 
 app.post('/api/cards', requireAuth, (req, res) => {
