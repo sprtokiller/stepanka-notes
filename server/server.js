@@ -55,6 +55,8 @@ wss.on('connection', (ws, req) => {
     ws.close(4001, 'unauthorized');
     return;
   }
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   clients.add(ws);
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
@@ -70,6 +72,14 @@ wss.on('connection', (ws, req) => {
     } catch {}
   });
 });
+
+setInterval(() => {
+  for (const ws of clients) {
+    if (!ws.isAlive) { ws.terminate(); clients.delete(ws); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 30_000);
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
