@@ -61,22 +61,23 @@ loginBtn.addEventListener('click', tryLogin);
 loginInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 /* ── state ─────────────────────────────────────────────────── */
-const state = { cards: [], connections: [], pan: { x: 0, y: 0 } };
+const state = { cards: [], connections: [], pan: { x: 0, y: 0 }, scale: 1 };
 let sortCounter = 0;
-let threadState = null;   // { fromCardId } — nit se táhne k kurzoru
-let dyingThreads = [];    // [ { pin1, pin2, cutX, cutY, startTime } ]
+let threadState = null;
+let dyingThreads = [];
 
 /* ── DOM refs ──────────────────────────────────────────────── */
 const world   = document.getElementById('world');
 const empty   = document.getElementById('empty');
 const counter = document.getElementById('counter');
 
-/* ── panning ───────────────────────────────────────────────── */
-function applyPan() {
-  world.style.transform = `translate(${state.pan.x}px, ${state.pan.y}px)`;
+/* ── transform ─────────────────────────────────────────────── */
+function applyTransform() {
+  world.style.transform = `translate(${state.pan.x}px, ${state.pan.y}px) scale(${state.scale})`;
   drawBackground();
 }
 
+/* ── panning (mouse) ───────────────────────────────────────── */
 let panState = null;
 window.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
@@ -92,7 +93,7 @@ window.addEventListener('mousemove', e => {
   if (!panState) return;
   state.pan.x = panState.ox + (e.clientX - panState.sx);
   state.pan.y = panState.oy + (e.clientY - panState.sy);
-  applyPan();
+  applyTransform();
 });
 window.addEventListener('mouseup', () => {
   if (!panState) return;
@@ -100,24 +101,66 @@ window.addEventListener('mouseup', () => {
   world.classList.remove('panning');
 });
 
-let touchPan = null;
+/* ── zoom (mouse wheel) ────────────────────────────────────── */
+window.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+  const cx = e.clientX, cy = e.clientY;
+  const wx = (cx - state.pan.x) / state.scale;
+  const wy = (cy - state.pan.y) / state.scale;
+  state.scale = Math.max(0.25, Math.min(4, state.scale * factor));
+  state.pan.x = cx - wx * state.scale;
+  state.pan.y = cy - wy * state.scale;
+  applyTransform();
+}, { passive: false });
+
+/* ── pan + pinch (touch) ───────────────────────────────────── */
+let touchPan   = null;
+let pinchState = null;
+
 window.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    const t0 = e.touches[0], t1 = e.touches[1];
+    const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    const cx   = (t0.clientX + t1.clientX) / 2;
+    const cy   = (t0.clientY + t1.clientY) / 2;
+    pinchState = { startDist: dist, startScale: state.scale, cx, cy, ox: state.pan.x, oy: state.pan.y };
+    touchPan = null;
+    return;
+  }
   if (e.touches.length !== 1) return;
   const t = e.target;
   if (t.closest('.card') || t.closest('.add') || t.closest('#login-screen')) return;
   const tt = e.touches[0];
   touchPan = { sx: tt.clientX, sy: tt.clientY, ox: state.pan.x, oy: state.pan.y };
 }, { passive: true });
+
 window.addEventListener('touchmove', e => {
+  if (pinchState && e.touches.length === 2) {
+    e.preventDefault();
+    const t0 = e.touches[0], t1 = e.touches[1];
+    const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    const mx   = (t0.clientX + t1.clientX) / 2;
+    const my   = (t0.clientY + t1.clientY) / 2;
+    const newScale = Math.max(0.25, Math.min(4, pinchState.startScale * dist / pinchState.startDist));
+    const wx = (pinchState.cx - pinchState.ox) / pinchState.startScale;
+    const wy = (pinchState.cy - pinchState.oy) / pinchState.startScale;
+    state.scale = newScale;
+    state.pan.x = mx - wx * newScale;
+    state.pan.y = my - wy * newScale;
+    applyTransform();
+    return;
+  }
   if (!touchPan) return;
   const tt = e.touches[0];
   state.pan.x = touchPan.ox + (tt.clientX - touchPan.sx);
   state.pan.y = touchPan.oy + (tt.clientY - touchPan.sy);
-  applyPan();
-}, { passive: true });
-window.addEventListener('touchend', () => {
-  if (!touchPan) return;
-  touchPan = null;
+  applyTransform();
+}, { passive: false });
+
+window.addEventListener('touchend', e => {
+  if (e.touches.length < 2) pinchState = null;
+  if (e.touches.length === 0) touchPan = null;
 });
 
 window.addEventListener('mousemove', e => {
@@ -128,8 +171,6 @@ window.addEventListener('mousemove', e => {
 });
 
 /* ── cards ─────────────────────────────────────────────────── */
-
-// card.id is a number (server-assigned) or string "new_<ts>" (unsaved temp)
 function isTempId(id) { return typeof id === 'string'; }
 
 function makeCardEl(card) {
@@ -207,8 +248,8 @@ function makeCardEl(card) {
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-    card.x = drag.ox + dx;
-    card.y = drag.oy + dy;
+    card.x = drag.ox + dx / state.scale;
+    card.y = drag.oy + dy / state.scale;
     el.style.left = card.x + 'px';
     el.style.top  = card.y + 'px';
   });
@@ -226,6 +267,7 @@ function makeCardEl(card) {
   const pin = el.querySelector('.pin');
   pin.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
+    if (!card.text) return;
     e.stopPropagation();
     e.preventDefault();
     if (threadState) {
@@ -258,7 +300,6 @@ function startEdit(el, card) {
   window.getSelection().addRange(r);
 
   const finish = async (commit) => {
-    // remove listeners first to prevent double-fire
     txt.removeAttribute('contenteditable');
     el.classList.remove('editing');
     txt.removeEventListener('blur', onBlur);
@@ -321,8 +362,8 @@ function plural(n) {
 }
 
 function clusterPos() {
-  const cx = -state.pan.x + window.innerWidth / 2;
-  const cy = -state.pan.y + window.innerHeight / 2;
+  const cx = (window.innerWidth  / 2 - state.pan.x) / state.scale;
+  const cy = (window.innerHeight / 2 - state.pan.y) / state.scale;
   const n = state.cards.length;
   const angle = n * 2.39996;
   const radius = 30 + Math.sqrt(n) * 70;
@@ -333,12 +374,19 @@ function clusterPos() {
   };
 }
 
+function panToCard(card) {
+  state.pan.x = window.innerWidth  / 2 - (card.x + 115) * state.scale;
+  state.pan.y = window.innerHeight / 2 - (card.y + 45)  * state.scale;
+  applyTransform();
+}
+
 function addCard() {
   const pos = clusterPos();
   const card = { id: `new_${Date.now()}`, text: '', x: pos.x, y: pos.y, rot: pos.rot, sort_order: 0 };
   state.cards.push(card);
   const el = makeCardEl(card);
   world.appendChild(el);
+  panToCard(card);
   startEdit(el, card);
   refreshEmpty();
 }
@@ -377,12 +425,18 @@ const TILE = 220;
 
 function drawBackground() {
   const W = innerWidth, H = innerHeight;
+  const sc = state.scale;
   bgCtx.clearRect(0, 0, W, H);
+  bgCtx.save();
+  bgCtx.translate(state.pan.x, state.pan.y);
+  bgCtx.scale(sc, sc);
 
-  const cols     = Math.ceil(W / TILE) + 3;
-  const rows     = Math.ceil(H / TILE) + 3;
-  const startCol = Math.floor(-state.pan.x / TILE) - 1;
-  const startRow = Math.floor(-state.pan.y / TILE) - 1;
+  const worldX0  = -state.pan.x / sc;
+  const worldY0  = -state.pan.y / sc;
+  const cols     = Math.ceil(W / (TILE * sc)) + 3;
+  const rows     = Math.ceil(H / (TILE * sc)) + 3;
+  const startCol = Math.floor(worldX0 / TILE) - 1;
+  const startRow = Math.floor(worldY0 / TILE) - 1;
 
   const nodes = [];
   for (let r = 0; r < rows; r++) {
@@ -391,23 +445,23 @@ function drawBackground() {
       const j  = hash2(gc, gr);
       const jx = (j % 97 - 48) / 48 * 28;
       const jy = ((j >> 3) % 97 - 48) / 48 * 28;
-      nodes.push({ x: gc * TILE + jx + state.pan.x, y: gr * TILE + jy + state.pan.y, h: j });
+      nodes.push({ x: gc * TILE + jx, y: gr * TILE + jy, h: j });
     }
   }
 
   bgCtx.strokeStyle = 'rgba(200,180,140,0.22)';
-  bgCtx.lineWidth = 0.7;
+  bgCtx.lineWidth = 0.7 / sc;
   const idx = (c, r) => r * cols + c;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const a = nodes[idx(c, r)];
       if (c + 1 < cols && (a.h & 7) > 2)
-        drawLine(a.x, a.y, nodes[idx(c + 1, r)].x, nodes[idx(c + 1, r)].y);
+        bgLine(a.x, a.y, nodes[idx(c + 1, r)].x, nodes[idx(c + 1, r)].y);
       if (r + 1 < rows && ((a.h >> 4) & 7) > 2)
-        drawLine(a.x, a.y, nodes[idx(c, r + 1)].x, nodes[idx(c, r + 1)].y);
+        bgLine(a.x, a.y, nodes[idx(c, r + 1)].x, nodes[idx(c, r + 1)].y);
       if (c + 1 < cols && r + 1 < rows && ((a.h >> 8) & 15) > 12) {
         bgCtx.save(); bgCtx.globalAlpha = 0.5;
-        drawLine(a.x, a.y, nodes[idx(c + 1, r + 1)].x, nodes[idx(c + 1, r + 1)].y);
+        bgLine(a.x, a.y, nodes[idx(c + 1, r + 1)].x, nodes[idx(c + 1, r + 1)].y);
         bgCtx.restore();
       }
     }
@@ -417,13 +471,14 @@ function drawBackground() {
     const red = (n.h & 31) === 0;
     bgCtx.beginPath();
     bgCtx.fillStyle = red ? 'rgba(184,58,58,0.55)' : 'rgba(170,148,108,0.55)';
-    bgCtx.arc(n.x, n.y, red ? 2.3 : 1.4, 0, Math.PI * 2);
+    bgCtx.arc(n.x, n.y, (red ? 2.3 : 1.4) / sc, 0, Math.PI * 2);
     bgCtx.fill();
   }
 
+  bgCtx.restore();
 }
 
-function drawLine(x1, y1, x2, y2) {
+function bgLine(x1, y1, x2, y2) {
   bgCtx.beginPath(); bgCtx.moveTo(x1, y1); bgCtx.lineTo(x2, y2); bgCtx.stroke();
 }
 
@@ -480,9 +535,9 @@ function isNearThread(mx, my, conn) {
   return false;
 }
 
-const THREAD_G    = 3000; // px/s² — gravitační zrychlení kyvadla
-const THREAD_DAMP = 0.9;  // tlumení za sekundu (s⁻¹)
-const THREAD_DUR  = 2000; // ms — délka animace po přestřižení
+const THREAD_G    = 3000;
+const THREAD_DAMP = 0.9;
+const THREAD_DUR  = 2000;
 
 function drawThreads() {
   const now = performance.now();
@@ -589,8 +644,8 @@ function centerOnCards() {
     maxY = Math.max(maxY, c.y + 90);
   }
   state.pan = {
-    x: window.innerWidth  / 2 - (minX + maxX) / 2,
-    y: window.innerHeight / 2 - (minY + maxY) / 2,
+    x: window.innerWidth  / 2 - (minX + maxX) / 2 * state.scale,
+    y: window.innerHeight / 2 - (minY + maxY) / 2 * state.scale,
   };
 }
 
@@ -601,7 +656,7 @@ async function loadAndRender() {
   state.connections = data.connections || [];
   sortCounter = state.cards.reduce((m, c) => Math.max(m, c.sort_order || 0), 0);
   centerOnCards();
-  applyPan();
+  applyTransform();
   renderAll();
   refreshEmpty();
 }

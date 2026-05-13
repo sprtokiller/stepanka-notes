@@ -172,6 +172,7 @@ body.can-pan #world { cursor: grab; }
 .logo {
   position: fixed; left: 24px; top: 22px; z-index: 10;
   display: flex; align-items: baseline; gap: 8px;
+  flex-wrap: wrap;
   font-family: "Instrument Serif", serif;
   font-size: 28px;
   letter-spacing: .005em;
@@ -179,11 +180,13 @@ body.can-pan #world { cursor: grab; }
 }
 .logo .bow { transform: translateY(-2px) rotate(-8deg); }
 .logo .sub {
+  flex-basis: 100%;
   font-family: "Newsreader", serif;
   font-style: italic;
   font-size: 13px;
   color: var(--ink-soft);
-  margin-left: 4px;
+  margin-left: 0;
+  margin-top: 1px;
 }
 
 /* ── hint ── */
@@ -312,4 +315,11 @@ body.can-pan #world { cursor: grab; }
   .logo { font-size: 22px; }
   .counter { font-size: 11px; }
   #login-input { width: 160px; }
+  .add {
+    left: auto;
+    right: 24px;
+    transform: none;
+  }
+  .add:hover  { transform: translateY(-2px); }
+  .add:active { transform: translateY(0) scale(.96); }
 }
