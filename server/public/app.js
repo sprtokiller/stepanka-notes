@@ -3,11 +3,13 @@
 /* ── token / auth ──────────────────────────────────────────── */
 const TOKEN_KEY = 'stepanka.token';
 let token = localStorage.getItem(TOKEN_KEY);
+const clientId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+let wsConn = null;
 
 async function apiFetch(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Token': token || '' },
+    headers: { 'Content-Type': 'application/json', 'X-Token': token || '', 'X-Client-Id': clientId },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -240,6 +242,11 @@ function makeCardEl(card) {
     if (el.classList.contains('editing')) return;
     if (e.target.closest('.del-x') || e.target.closest('.pin')) return;
     e.stopPropagation();
+    if (threadState) {
+      if (threadState.fromCardId !== card.id && card.text) createConnection(threadState.fromCardId, card.id);
+      threadState = null;
+      return;
+    }
     drag = { sx: e.clientX, sy: e.clientY, ox: card.x, oy: card.y, moved: false };
     el.classList.add('dragging');
     bringToFront(el, card);
@@ -252,6 +259,13 @@ function makeCardEl(card) {
     card.y = drag.oy + dy / state.scale;
     el.style.left = card.x + 'px';
     el.style.top  = card.y + 'px';
+    if (wsConn && wsConn.readyState === 1 && !isTempId(card.id)) {
+      const now = Date.now();
+      if (!drag.lastSent || now - drag.lastSent >= 50) {
+        drag.lastSent = now;
+        wsConn.send(JSON.stringify({ event: 'card:moved', clientId, id: card.id, x: card.x, y: card.y }));
+      }
+    }
   });
   window.addEventListener('mouseup', () => {
     if (!drag) return;
@@ -338,17 +352,19 @@ function startEdit(el, card) {
   txt.addEventListener('keydown', onKey);
 }
 
-function removeCard(id) {
+function removeCardLocal(id) {
   const i = state.cards.findIndex(c => c.id === id);
   if (i < 0) return;
   state.cards.splice(i, 1);
   state.connections = state.connections.filter(c => c.from_id !== id && c.to_id !== id);
   const el = world.querySelector(`.card[data-id="${id}"]`);
   if (el) { el.classList.add('leaving'); setTimeout(() => el.remove(), 240); }
-  if (!isTempId(id)) {
-    apiFetch('DELETE', `/api/cards/${id}`).catch(() => {});
-  }
   refreshEmpty();
+}
+
+function removeCard(id) {
+  removeCardLocal(id);
+  if (!isTempId(id)) apiFetch('DELETE', `/api/cards/${id}`).catch(() => {});
 }
 
 function refreshEmpty() {
@@ -386,7 +402,6 @@ function addCard() {
   state.cards.push(card);
   const el = makeCardEl(card);
   world.appendChild(el);
-  panToCard(card);
   startEdit(el, card);
   refreshEmpty();
 }
@@ -601,7 +616,7 @@ function makePendulumEnd(pivot, cx, cy) {
   return { pivotX: pivot.x, pivotY: pivot.y, L, theta: Math.atan2(dx, dy), omega: 0 };
 }
 
-function cutThread(conn, cutX, cutY) {
+function cutThreadLocal(conn, cutX, cutY) {
   const i = state.connections.indexOf(conn);
   if (i < 0) return;
   state.connections.splice(i, 1);
@@ -615,8 +630,28 @@ function cutThread(conn, cutX, cutY) {
       startTime: now, lastTime: now,
     });
   }
-  if (conn.id !== null) apiFetch('DELETE', `/api/connections/${conn.id}`).catch(() => {});
 }
+
+function cutThread(conn, cutX, cutY) {
+  cutThreadLocal(conn, cutX, cutY);
+  if (conn.id !== null) apiFetch('DELETE', `/api/connections/${conn.id}`, { cutX, cutY }).catch(() => {});
+}
+
+window.addEventListener('dblclick', e => {
+  if (!token) return;
+  const t = e.target;
+  if (t.closest('.card') || t.closest('.add') || t.closest('.logo') ||
+      t.closest('.hint') || t.closest('.counter') || t.closest('#login-screen')) return;
+  threadState = null;
+  const wx = (e.clientX - state.pan.x) / state.scale - 115;
+  const wy = (e.clientY - state.pan.y) / state.scale - 45;
+  const card = { id: `new_${Date.now()}`, text: '', x: wx, y: wy, rot: (Math.random() - .5) * 3.6, sort_order: 0 };
+  state.cards.push(card);
+  const el = makeCardEl(card);
+  world.appendChild(el);
+  startEdit(el, card);
+  refreshEmpty();
+});
 
 window.addEventListener('contextmenu', e => {
   e.preventDefault();
@@ -659,6 +694,87 @@ async function loadAndRender() {
   applyTransform();
   renderAll();
   refreshEmpty();
+  connectWS();
+}
+
+/* ── WebSocket real-time sync ──────────────────────────────── */
+function connectWS() {
+  if (!token) return;
+  if (wsConn && wsConn.readyState <= 1) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  wsConn = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  wsConn.addEventListener('message', e => {
+    try { handleWSMessage(JSON.parse(e.data)); } catch {}
+  });
+  wsConn.addEventListener('close', () => {
+    wsConn = null;
+    if (token) setTimeout(connectWS, 3000);
+  });
+  wsConn.addEventListener('error', () => {});
+}
+
+function handleWSMessage(msg) {
+  if (msg.clientId === clientId) return;
+
+  switch (msg.event) {
+    case 'card:created': {
+      if (state.cards.find(c => c.id === msg.id)) break;
+      const card = { id: msg.id, text: msg.text, x: msg.x, y: msg.y, rot: msg.rot, sort_order: msg.sort_order };
+      state.cards.push(card);
+      sortCounter = Math.max(sortCounter, msg.sort_order || 0);
+      world.appendChild(makeCardEl(card));
+      refreshEmpty();
+      break;
+    }
+    case 'card:updated': {
+      const card = state.cards.find(c => c.id === msg.id);
+      if (!card) break;
+      const el = world.querySelector(`.card[data-id="${msg.id}"]`);
+      const busy = el && (el.classList.contains('editing') || el.classList.contains('dragging'));
+      card.x = msg.x; card.y = msg.y; card.rot = msg.rot; card.sort_order = msg.sort_order;
+      sortCounter = Math.max(sortCounter, msg.sort_order || 0);
+      if (!busy) {
+        card.text = msg.text;
+        if (el) {
+          el.querySelector('.txt').textContent = msg.text;
+          el.style.left = msg.x + 'px';
+          el.style.top  = msg.y + 'px';
+          el.style.transform = `rotate(${msg.rot || 0}deg)`;
+        }
+      }
+      break;
+    }
+    case 'card:deleted':
+      removeCardLocal(msg.id);
+      break;
+    case 'connection:created': {
+      if (state.connections.some(c => c.id === msg.id ||
+          (c.from_id === msg.from_id && c.to_id === msg.to_id))) break;
+      state.connections.push({ id: msg.id, from_id: msg.from_id, to_id: msg.to_id });
+      break;
+    }
+    case 'card:moved': {
+      const card = state.cards.find(c => c.id === msg.id);
+      if (!card) break;
+      card.x = msg.x; card.y = msg.y;
+      const el = world.querySelector(`.card[data-id="${msg.id}"]`);
+      if (el && !el.classList.contains('dragging')) {
+        el.style.left = msg.x + 'px';
+        el.style.top  = msg.y + 'px';
+      }
+      break;
+    }
+    case 'connection:deleted': {
+      const conn = state.connections.find(c => c.id === msg.id);
+      if (!conn) break;
+      const p1 = getPinScreenPos(conn.from_id);
+      const p2 = getPinScreenPos(conn.to_id);
+      const cutX = p1 && p2 ? (p1.x + p2.x) / 2 : msg.cutX;
+      const cutY = p1 && p2 ? (p1.y + p2.y) / 2 : msg.cutY;
+      cutThreadLocal(conn, cutX, cutY);
+      break;
+    }
+  }
 }
 
 /* ── boot ──────────────────────────────────────────────────── */
