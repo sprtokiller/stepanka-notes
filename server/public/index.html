@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Štěpánka</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- background animation canvas -->
+<canvas id="bg"></canvas>
+<!-- foreground canvas — threads drawn above cards -->
+<canvas id="fg" aria-hidden="true"></canvas>
+
+<!-- infinite card canvas -->
+<div id="world" aria-label="plátno"></div>
+
+<!-- empty state -->
+<div class="empty hidden" id="empty">
+  <div class="big">tady je ticho.</div>
+  <svg class="arrow" viewBox="0 0 80 50" fill="none" stroke="#C7BAA1" stroke-width="1.2" stroke-linecap="round">
+    <path d="M4 6 C 20 8, 30 22, 36 38"/>
+    <path d="M30 32 L36 40 L44 34"/>
+  </svg>
+  <div class="small">klikni na <b>+</b> a napiš první téma</div>
+</div>
+
+<!-- logo -->
+<div class="logo">
+  <span>Štěpánka</span>
+  <span class="bow" aria-hidden="true" style="margin:0 2px">
+    <svg width="22" height="14" viewBox="0 0 44 28">
+      <path d="M22 14 C 14 4, 4 4, 3 10 C 2 16, 10 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 30 4, 40 4, 41 10 C 42 16, 34 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 16 6, 8 6, 5 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+      <path d="M22 14 C 28 6, 36 6, 39 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+      <rect x="19.5" y="10" width="5" height="8" rx="1.2" fill="#9B2D2D"/>
+      <path d="M20 18 L17 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M24 18 L27 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  </span>
+  <span>Víťa</span>
+  <span class="sub">místo na slova mezi námi</span>
+</div>
+
+<!-- card counter -->
+<div class="counter" id="counter"><b>0</b> témat</div>
+
+<!-- hint -->
+<div class="hint">
+  <b>+</b> nové téma · drag karty · drag pozadí pro posun ·
+  <kbd>dvojklik</kbd> upravit
+</div>
+
+<!-- add button -->
+<button class="add" id="add" title="Přidat téma">
+  <span class="plus"></span>
+  <span class="bow" aria-hidden="true">
+    <svg width="16" height="10" viewBox="0 0 44 28">
+      <path d="M22 14 C 14 4, 4 4, 3 10 C 2 16, 10 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 30 4, 40 4, 41 10 C 42 16, 34 22, 22 14 Z" fill="#B83A3A"/>
+      <rect x="19.5" y="10" width="5" height="8" rx="1.2" fill="#9B2D2D"/>
+    </svg>
+  </span>
+</button>
+
+<!-- login screen — shown before auth, hidden after -->
+<div id="login-screen" class="hidden">
+  <div class="login-box">
+    <div class="login-bow" aria-hidden="true">
+      <svg width="72" height="45" viewBox="0 0 44 28">
+        <path d="M22 14 C 14 4, 4 4, 3 10 C 2 16, 10 22, 22 14 Z" fill="#B83A3A"/>
+        <path d="M22 14 C 30 4, 40 4, 41 10 C 42 16, 34 22, 22 14 Z" fill="#B83A3A"/>
+        <path d="M22 14 C 16 6, 8 6, 5 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+        <path d="M22 14 C 28 6, 36 6, 39 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+        <rect x="19.5" y="10" width="5" height="8" rx="1.2" fill="#9B2D2D"/>
+        <path d="M20 18 L17 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M24 18 L27 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="login-field">
+      <input
+        type="password"
+        id="login-input"
+        placeholder="…"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      >
+      <button id="login-btn" title="Vstoupit">→</button>
+    </div>
+    <p class="login-err" id="login-err"></p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

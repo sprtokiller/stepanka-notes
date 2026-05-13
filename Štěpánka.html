@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Štěpánka</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBF7EE;
+    --paper-2:#F5EFE1;
+    --ink:#2E2620;
+    --ink-soft:#6E6258;
+    --line:#E6DCC8;
+    --line-soft:#EEE6D4;
+    --card:#FFFFFF;
+    --card-edge:#ECE2CC;
+    --red:#B83A3A;
+    --red-soft:#D9756F;
+    --red-deep:#8E2929;
+    --shadow: 0 1px 0 rgba(120,90,40,.04), 0 6px 16px -8px rgba(120,90,40,.18), 0 22px 40px -28px rgba(120,90,40,.18);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Newsreader","Iowan Old Style",Georgia,serif;
+    font-weight:400;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    cursor:default;
+    user-select:none;
+  }
+
+  /* Background canvas — network + cursor trails */
+  #bg{
+    position:fixed;inset:0;width:100%;height:100%;
+    z-index:0; pointer-events:none;
+  }
+
+  /* The world — pans with translate */
+  #world{
+    position:fixed;inset:0;
+    z-index:1;
+    transform-origin:0 0;
+    will-change:transform;
+  }
+  #world.panning{cursor:grabbing}
+  body.can-pan #world{cursor:grab}
+
+  /* Cards */
+  .card{
+    position:absolute;
+    min-width:180px;
+    max-width:280px;
+    background:var(--card);
+    border:1px solid var(--card-edge);
+    border-radius:14px;
+    padding:18px 20px 16px;
+    box-shadow:var(--shadow);
+    font-family:"Newsreader",Georgia,serif;
+    font-size:18px;
+    line-height:1.42;
+    color:var(--ink);
+    cursor:grab;
+    transition:box-shadow .2s ease, transform .15s ease;
+    transform-origin:center center;
+  }
+  .card:hover{
+    box-shadow:0 1px 0 rgba(120,90,40,.05), 0 10px 22px -10px rgba(120,90,40,.22), 0 30px 50px -30px rgba(120,90,40,.22);
+  }
+  .card.dragging{cursor:grabbing; box-shadow:0 2px 0 rgba(120,90,40,.06), 0 18px 40px -16px rgba(120,90,40,.30), 0 40px 70px -40px rgba(120,90,40,.30); z-index:5}
+  .card.entering{ animation: pop .35s cubic-bezier(.2,.9,.3,1.2) both; }
+  @keyframes pop{
+    0%{transform: scale(.6) rotate(-3deg); opacity:0}
+    60%{transform: scale(1.04) rotate(.5deg); opacity:1}
+    100%{transform: scale(1) rotate(0); opacity:1}
+  }
+  .card.leaving{ animation: poof .25s ease-in both; pointer-events:none }
+  @keyframes poof{
+    to{ transform: scale(.7) rotate(4deg); opacity:0 }
+  }
+
+  .card .txt{
+    white-space:pre-wrap;
+    word-break:break-word;
+    outline:none;
+  }
+  .card.editing{
+    cursor:text;
+    border-color:#D7C9A5;
+    box-shadow:0 1px 0 rgba(120,90,40,.05), 0 0 0 4px rgba(184,58,58,.08), 0 12px 24px -12px rgba(120,90,40,.22);
+  }
+  .card.editing .txt{
+    user-select:text;
+    -webkit-user-select:text;
+  }
+  .card .txt[contenteditable=true]:empty:before{
+    content: attr(data-placeholder);
+    color:#B7AC97;
+    font-style:italic;
+  }
+
+  .card .meta{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-top:10px;
+    font-size:11px;
+    letter-spacing:.04em;
+    color:#B7AC97;
+    text-transform:uppercase;
+    font-family:"Instrument Serif", serif;
+    letter-spacing:.12em;
+  }
+  .card .pin{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--red);
+    box-shadow: 0 0 0 3px rgba(184,58,58,.12);
+    flex:none;
+  }
+  .card .del{
+    appearance:none;border:0;background:transparent;color:#C9BCA0;
+    font:inherit; font-size:14px; cursor:pointer;
+    padding:2px 6px; border-radius:6px;
+    opacity:0; transition:opacity .15s, color .15s, background .15s;
+    font-family:"Newsreader",serif;
+  }
+  .card:hover .del{opacity:1}
+  .card .del:hover{color:var(--red); background:rgba(184,58,58,.06)}
+
+  /* Plus button */
+  .add{
+    position:fixed;
+    left:50%; bottom:36px; transform:translateX(-50%);
+    z-index:10;
+    width:64px;height:64px;border-radius:50%;
+    background:var(--card);
+    border:1px solid var(--card-edge);
+    box-shadow:0 1px 0 rgba(120,90,40,.05), 0 10px 24px -10px rgba(120,90,40,.25), 0 30px 50px -30px rgba(120,90,40,.30);
+    display:grid;place-items:center;
+    cursor:pointer;
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .add:hover{ transform:translateX(-50%) translateY(-2px); }
+  .add:active{ transform:translateX(-50%) translateY(0) scale(.96); }
+  .add .plus{
+    width:22px;height:22px;
+    position:relative;
+  }
+  .add .plus:before,.add .plus:after{
+    content:""; position:absolute; background:var(--ink);
+    border-radius:2px;
+  }
+  .add .plus:before{ left:50%; top:0; width:2px; height:100%; transform:translateX(-50%) }
+  .add .plus:after{ top:50%; left:0; height:2px; width:100%; transform:translateY(-50%) }
+  /* tiny bow on plus */
+  .add .bow{
+    position:absolute; top:-6px; right:-4px;
+    transform: rotate(14deg);
+  }
+
+  /* Logo */
+  .logo{
+    position:fixed; left:24px; top:22px; z-index:10;
+    display:flex; align-items:baseline; gap:8px;
+    font-family:"Instrument Serif", serif;
+    font-size:28px;
+    letter-spacing:.005em;
+    color:var(--ink);
+  }
+  .logo .bow{ transform: translateY(-2px) rotate(-8deg); }
+  .logo .sub{
+    font-family:"Newsreader",serif;
+    font-style:italic;
+    font-size:13px;
+    color:var(--ink-soft);
+    margin-left:4px;
+  }
+
+  /* Hint */
+  .hint{
+    position:fixed; right:22px; bottom:30px; z-index:10;
+    font-family:"Newsreader",serif; font-style:italic;
+    font-size:12.5px; color:#A89A82;
+    max-width:200px; text-align:right;
+    line-height:1.5;
+  }
+  .hint b{ font-style:normal; font-weight:500; color:var(--ink-soft); }
+  .hint kbd{
+    font-family:"Newsreader",serif; font-style:normal;
+    background:rgba(255,255,255,.7);
+    border:1px solid var(--line);
+    border-radius:5px;
+    padding:0 5px;
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+
+  /* Counter */
+  .counter{
+    position:fixed; right:24px; top:24px; z-index:10;
+    font-family:"Instrument Serif", serif;
+    font-size:14px; letter-spacing:.14em;
+    color:#B5A78D; text-transform:uppercase;
+  }
+  .counter b{ color:var(--red); font-weight:400; font-size:18px; font-style:italic; }
+
+  /* Empty state */
+  .empty{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    z-index:2; pointer-events:none;
+    text-align:center; color:#B7AC97;
+    font-family:"Instrument Serif",serif;
+    transition:opacity .3s;
+  }
+  .empty.hidden{opacity:0}
+  .empty .big{ font-size:42px; font-style:italic; color:#C7BAA1; letter-spacing:.01em; }
+  .empty .arrow{
+    display:block;
+    margin: 10px auto 0;
+    width:80px; opacity:.55;
+  }
+  .empty .small{
+    font-family:"Newsreader",serif; font-style:italic;
+    font-size:14px; color:#B7AC97; margin-top:4px;
+  }
+
+  /* Small bow svg, used in multiple places */
+  .bow svg{display:block}
+
+  /* mobile-ish */
+  @media (max-width:540px){
+    .hint{display:none}
+    .logo{font-size:22px}
+    .counter{font-size:11px}
+  }
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+
+<div id="world" aria-label="plátno"></div>
+
+<div class="empty" id="empty">
+  <div class="big">tady je ticho.</div>
+  <svg class="arrow" viewBox="0 0 80 50" fill="none" stroke="#C7BAA1" stroke-width="1.2" stroke-linecap="round">
+    <path d="M4 6 C 20 8, 30 22, 36 38" />
+    <path d="M30 32 L36 40 L44 34" />
+  </svg>
+  <div class="small">klikni na <b>+</b> a napiš první téma</div>
+</div>
+
+<div class="logo">
+  <span>Štěpánka</span>
+  <span class="bow" aria-hidden="true" style="margin:0 2px;">
+    <svg width="22" height="14" viewBox="0 0 44 28">
+      <path d="M22 14 C 14 4, 4 4, 3 10 C 2 16, 10 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 30 4, 40 4, 41 10 C 42 16, 34 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 16 6, 8 6, 5 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+      <path d="M22 14 C 28 6, 36 6, 39 9" stroke="#8E2929" stroke-width=".7" fill="none" opacity=".55"/>
+      <rect x="19.5" y="10" width="5" height="8" rx="1.2" fill="#9B2D2D"/>
+      <path d="M20 18 L17 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M24 18 L27 26" stroke="#B83A3A" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  </span>
+  <span>Víťa</span>
+  <span class="sub">místo na slova mezi námi</span>
+</div>
+
+<div class="counter" id="counter"><b>0</b> témat</div>
+
+<div class="hint">
+  <b>+</b> nové téma · drag karty · drag pozadí pro posun ·
+  <kbd>dvojklik</kbd> upravit
+</div>
+
+<button class="add" id="add" title="Přidat téma">
+  <span class="plus"></span>
+  <span class="bow" aria-hidden="true">
+    <svg width="16" height="10" viewBox="0 0 44 28">
+      <path d="M22 14 C 14 4, 4 4, 3 10 C 2 16, 10 22, 22 14 Z" fill="#B83A3A"/>
+      <path d="M22 14 C 30 4, 40 4, 41 10 C 42 16, 34 22, 22 14 Z" fill="#B83A3A"/>
+      <rect x="19.5" y="10" width="5" height="8" rx="1.2" fill="#9B2D2D"/>
+    </svg>
+  </span>
+</button>
+
+<script>
+/* ---------- state ---------- */
+const STORAGE_KEY = 'stepanka.v1';
+const state = load() || {
+  cards: [],
+  pan: {x:0, y:0},
+  nextId: 1,
+};
+
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
+    if(!s) return null;
+    s.cards = s.cards || [];
+    s.pan = s.pan || {x:0,y:0};
+    s.nextId = s.nextId || (s.cards.reduce((m,c)=>Math.max(m,c.id),0)+1);
+    return s;
+  }catch(e){ return null; }
+}
+function save(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+/* ---------- world / panning ---------- */
+const world = document.getElementById('world');
+const empty = document.getElementById('empty');
+const counter = document.getElementById('counter');
+
+function applyPan(){
+  world.style.transform = `translate(${state.pan.x}px, ${state.pan.y}px)`;
+  drawBackground(); // re-draw network to align
+}
+
+let panState = null;
+window.addEventListener('mousedown', e=>{
+  // start pan only if click landed on empty world / background / canvas
+  if(e.button !== 0) return;
+  const t = e.target;
+  if(t.closest('.card') || t.closest('.add') || t.closest('.logo') || t.closest('.hint') || t.closest('.counter')) return;
+  panState = { sx:e.clientX, sy:e.clientY, ox:state.pan.x, oy:state.pan.y };
+  world.classList.add('panning');
+  document.body.classList.remove('can-pan');
+});
+window.addEventListener('mousemove', e=>{
+  if(panState){
+    state.pan.x = panState.ox + (e.clientX - panState.sx);
+    state.pan.y = panState.oy + (e.clientY - panState.sy);
+    applyPan();
+  }
+});
+window.addEventListener('mouseup', ()=>{
+  if(panState){
+    panState = null;
+    world.classList.remove('panning');
+    save();
+  }
+});
+
+// touch pan (single finger on empty area)
+let touchPan = null;
+window.addEventListener('touchstart', e=>{
+  if(e.touches.length !== 1) return;
+  const t = e.target;
+  if(t.closest('.card') || t.closest('.add')) return;
+  const tt = e.touches[0];
+  touchPan = { sx:tt.clientX, sy:tt.clientY, ox:state.pan.x, oy:state.pan.y };
+}, {passive:true});
+window.addEventListener('touchmove', e=>{
+  if(!touchPan) return;
+  const tt = e.touches[0];
+  state.pan.x = touchPan.ox + (tt.clientX - touchPan.sx);
+  state.pan.y = touchPan.oy + (tt.clientY - touchPan.sy);
+  applyPan();
+},{passive:true});
+window.addEventListener('touchend', ()=>{ if(touchPan){ touchPan=null; save(); }});
+
+/* cursor cue */
+window.addEventListener('mousemove', e=>{
+  const t = e.target;
+  const overBg = !(t.closest('.card') || t.closest('.add') || t.closest('.logo') || t.closest('.hint') || t.closest('.counter'));
+  document.body.classList.toggle('can-pan', overBg);
+});
+
+/* ---------- cards ---------- */
+function makeCardEl(card){
+  const el = document.createElement('div');
+  el.className = 'card entering';
+  el.dataset.id = card.id;
+  el.style.left = card.x + 'px';
+  el.style.top  = card.y + 'px';
+  el.style.transform = `rotate(${card.rot||0}deg)`;
+  el.innerHTML = `
+    <div class="txt" data-placeholder="napiš téma…" spellcheck="false"></div>
+    <div class="meta">
+      <span class="pin" aria-hidden="true"></span>
+      <button class="del" title="smazat">smazat</button>
+    </div>`;
+  const txt = el.querySelector('.txt');
+  txt.textContent = card.text || '';
+  el.querySelector('.del').addEventListener('mousedown', e=>{
+    e.stopPropagation();
+  });
+  el.querySelector('.del').addEventListener('click', e=>{
+    e.stopPropagation();
+    removeCard(card.id);
+  });
+
+  // double click to edit
+  el.addEventListener('dblclick', e=>{
+    if(e.target.closest('.del')) return;
+    startEdit(el, card);
+  });
+
+  // drag
+  let drag = null;
+  el.addEventListener('mousedown', e=>{
+    if(el.classList.contains('editing')) return;
+    if(e.target.closest('.del')) return;
+    e.stopPropagation();
+    drag = {
+      sx:e.clientX, sy:e.clientY,
+      ox:card.x, oy:card.y,
+      moved:false
+    };
+    el.classList.add('dragging');
+    bringToFront(el, card);
+  });
+  window.addEventListener('mousemove', e=>{
+    if(!drag) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if(Math.abs(dx)+Math.abs(dy) > 3) drag.moved = true;
+    card.x = drag.ox + dx;
+    card.y = drag.oy + dy;
+    el.style.left = card.x + 'px';
+    el.style.top  = card.y + 'px';
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(!drag) return;
+    el.classList.remove('dragging');
+    if(drag.moved) save();
+    drag = null;
+  });
+
+  setTimeout(()=>el.classList.remove('entering'), 400);
+  return el;
+}
+
+function bringToFront(el, card){
+  // move to end of DOM so it stacks above siblings
+  if(el.parentNode && el.parentNode.lastChild !== el){
+    el.parentNode.appendChild(el);
+  }
+  // also reorder in state so save persists order
+  const i = state.cards.findIndex(c=>c.id===card.id);
+  if(i>=0){ state.cards.splice(i,1); state.cards.push(card); }
+}
+
+function startEdit(el, card){
+  el.classList.add('editing');
+  const txt = el.querySelector('.txt');
+  txt.setAttribute('contenteditable','true');
+  txt.focus();
+  // place cursor at end
+  const r = document.createRange();
+  r.selectNodeContents(txt); r.collapse(false);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+
+  const finish = (commit)=>{
+    txt.removeAttribute('contenteditable');
+    el.classList.remove('editing');
+    txt.removeEventListener('blur', onBlur);
+    txt.removeEventListener('keydown', onKey);
+    if(commit){
+      const v = txt.textContent.trim();
+      if(!v){ removeCard(card.id); return; }
+      card.text = v;
+      txt.textContent = v;
+      save();
+    } else {
+      txt.textContent = card.text || '';
+      if(!card.text){ removeCard(card.id); }
+    }
+  };
+  const onBlur = ()=> finish(true);
+  const onKey = (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); txt.blur(); }
+    else if(e.key==='Escape'){ e.preventDefault(); finish(false); }
+  };
+  txt.addEventListener('blur', onBlur);
+  txt.addEventListener('keydown', onKey);
+}
+
+function removeCard(id){
+  const i = state.cards.findIndex(c=>c.id===id);
+  if(i<0) return;
+  const card = state.cards[i];
+  state.cards.splice(i,1);
+  const el = world.querySelector(`.card[data-id="${id}"]`);
+  if(el){
+    el.classList.add('leaving');
+    setTimeout(()=>el.remove(), 240);
+  }
+  save();
+  refreshEmpty();
+}
+
+function refreshEmpty(){
+  empty.classList.toggle('hidden', state.cards.length>0);
+  counter.innerHTML = `<b>${state.cards.length}</b> ${plural(state.cards.length)}`;
+}
+function plural(n){
+  if(n===1) return 'téma';
+  if(n>=2 && n<=4) return 'témata';
+  return 'témat';
+}
+
+function clusterPos(){
+  // place new card near center of viewport, offset by current pan & cluster crowding
+  const cx = -state.pan.x + window.innerWidth/2;
+  const cy = -state.pan.y + window.innerHeight/2;
+  // gentle spiral / random offset
+  const n = state.cards.length;
+  const angle = n * 2.39996; // golden-angle spiral
+  const radius = 30 + Math.sqrt(n) * 70;
+  const jx = (Math.random()-.5)*30;
+  const jy = (Math.random()-.5)*30;
+  return {
+    x: cx + Math.cos(angle)*radius + jx - 110,
+    y: cy + Math.sin(angle)*radius + jy - 40,
+    rot: (Math.random()-.5)*3.6,
+  };
+}
+
+function addCard(){
+  const pos = clusterPos();
+  const card = { id: state.nextId++, text:'', ...pos };
+  state.cards.push(card);
+  const el = makeCardEl(card);
+  world.appendChild(el);
+  startEdit(el, card);
+  refreshEmpty();
+}
+
+document.getElementById('add').addEventListener('click', addCard);
+
+// Render existing
+function renderAll(){
+  world.innerHTML = '';
+  for(const c of state.cards){ world.appendChild(makeCardEl(c)); }
+}
+
+/* ---------- BACKGROUND: dot grid + faint network lines + cursor wavy trail ---------- */
+const bgCanvas = document.getElementById('bg');
+const bgCtx = bgCanvas.getContext('2d');
+
+let DPR = Math.max(1, Math.min(window.devicePixelRatio||1, 2));
+function resizeBg(){
+  DPR = Math.max(1, Math.min(window.devicePixelRatio||1, 2));
+  bgCanvas.width = innerWidth * DPR;
+  bgCanvas.height = innerHeight * DPR;
+  bgCanvas.style.width = innerWidth+'px';
+  bgCanvas.style.height = innerHeight+'px';
+  bgCtx.setTransform(DPR,0,0,DPR,0,0);
+  drawBackground();
+}
+window.addEventListener('resize', resizeBg);
+
+// Deterministic-ish network points across a tiled world
+const TILE = 220;            // grid spacing
+function drawBackground(){
+  const W = innerWidth, H = innerHeight;
+  bgCtx.clearRect(0,0,W,H);
+
+  const ox = ((state.pan.x % TILE) + TILE) % TILE;
+  const oy = ((state.pan.y % TILE) + TILE) % TILE;
+
+  // collect node positions (with subtle deterministic jitter per cell)
+  const cols = Math.ceil(W/TILE) + 3;
+  const rows = Math.ceil(H/TILE) + 3;
+
+  // node grid indices (col, row) in world space
+  const startCol = Math.floor((-state.pan.x)/TILE) - 1;
+  const startRow = Math.floor((-state.pan.y)/TILE) - 1;
+
+  const nodes = [];
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const gc = startCol + c, gr = startRow + r;
+      // hash-based jitter
+      const j = hash2(gc, gr);
+      const jx = (j%97 - 48)/48 * 28;  // -28..28
+      const jy = ((j>>3)%97 - 48)/48 * 28;
+      const x = gc*TILE + jx + state.pan.x;
+      const y = gr*TILE + jy + state.pan.y;
+      nodes.push({x,y,gc,gr,h:j});
+    }
+  }
+
+  // Draw connection lines (sparse — each node connects to its right + down neighbour if hash allows)
+  bgCtx.strokeStyle = 'rgba(200,180,140,0.22)';
+  bgCtx.lineWidth = 0.7;
+  const idx = (c,r) => r*cols + c;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const a = nodes[idx(c,r)];
+      if(c+1 < cols){
+        const b = nodes[idx(c+1,r)];
+        if((a.h & 7) > 2){ // ~70% of horizontal links
+          drawSoftLine(a.x,a.y,b.x,b.y);
+        }
+      }
+      if(r+1 < rows){
+        const b = nodes[idx(c,r+1)];
+        if(((a.h>>4) & 7) > 2){
+          drawSoftLine(a.x,a.y,b.x,b.y);
+        }
+      }
+      // diagonals — much sparser
+      if(c+1<cols && r+1<rows){
+        const b = nodes[idx(c+1,r+1)];
+        if(((a.h>>8) & 15) > 12){
+          bgCtx.save();
+          bgCtx.globalAlpha = 0.5;
+          drawSoftLine(a.x,a.y,b.x,b.y);
+          bgCtx.restore();
+        }
+      }
+    }
+  }
+
+  // Draw nodes (tiny dots)
+  for(const n of nodes){
+    bgCtx.beginPath();
+    bgCtx.fillStyle = (n.h & 31) === 0 ? 'rgba(184,58,58,0.55)' : 'rgba(170,148,108,0.55)';
+    const rad = (n.h & 31) === 0 ? 2.3 : 1.4;
+    bgCtx.arc(n.x, n.y, rad, 0, Math.PI*2);
+    bgCtx.fill();
+  }
+
+  // Cursor trail (wavy red lines) — drawn last so it's on top
+  drawCursorTrail();
+}
+
+function drawSoftLine(x1,y1,x2,y2){
+  bgCtx.beginPath();
+  bgCtx.moveTo(x1,y1);
+  bgCtx.lineTo(x2,y2);
+  bgCtx.stroke();
+}
+
+function hash2(x,y){
+  let h = (x*374761393 + y*668265263) | 0;
+  h = (h ^ (h>>>13)) * 1274126177;
+  h = h ^ (h>>>16);
+  return h >>> 0;
+}
+
+/* ---------- cursor wavy trail ---------- */
+const trail = []; // {x,y,t}
+let lastCursor = {x:-9999,y:-9999};
+window.addEventListener('mousemove', e=>{
+  lastCursor = {x:e.clientX, y:e.clientY};
+  const last = trail[trail.length-1];
+  if(!last || Math.hypot(last.x-e.clientX, last.y-e.clientY) > 6){
+    trail.push({x:e.clientX, y:e.clientY, t:performance.now()});
+    if(trail.length>50) trail.shift();
+  }
+});
+window.addEventListener('mouseleave', ()=>{ lastCursor = {x:-9999,y:-9999}; });
+
+function drawCursorTrail(){
+  const now = performance.now();
+  // prune
+  while(trail.length && now - trail[0].t > 1100) trail.shift();
+  if(trail.length < 2) return;
+
+  bgCtx.save();
+  bgCtx.lineCap = 'round';
+  bgCtx.lineJoin = 'round';
+
+  // wavy line — perpendicular sine offset along path
+  const pts = trail;
+  // build smoothed points with sine perturbation
+  for(let pass=0; pass<2; pass++){
+    bgCtx.beginPath();
+    let started = false;
+    for(let i=0;i<pts.length;i++){
+      const p = pts[i];
+      // direction
+      const prev = pts[Math.max(0,i-1)];
+      const next = pts[Math.min(pts.length-1,i+1)];
+      const dx = next.x - prev.x, dy = next.y - prev.y;
+      const len = Math.hypot(dx,dy) || 1;
+      const nx = -dy/len, ny = dx/len;
+      const age = (now - p.t)/1000; // seconds
+      const amp = 5 * (pass===0 ? 1 : -1) * (1 - Math.min(1, age/1.0));
+      const phase = now*0.012 + i*0.7 + pass*Math.PI;
+      const wob = Math.sin(phase) * amp;
+      const x = p.x + nx*wob;
+      const y = p.y + ny*wob;
+      if(!started){ bgCtx.moveTo(x,y); started=true; }
+      else        { bgCtx.lineTo(x,y); }
+    }
+    // gradient stroke fading along path
+    const head = pts[pts.length-1];
+    const tail = pts[0];
+    const grad = bgCtx.createLinearGradient(tail.x,tail.y,head.x,head.y);
+    grad.addColorStop(0, 'rgba(184,58,58,0)');
+    grad.addColorStop(0.4, 'rgba(184,58,58,0.10)');
+    grad.addColorStop(1, 'rgba(184,58,58,0.55)');
+    bgCtx.strokeStyle = grad;
+    bgCtx.lineWidth = pass===0 ? 1.6 : 0.9;
+    bgCtx.stroke();
+  }
+
+  // tiny halo at current cursor
+  if(lastCursor.x > -1000){
+    const g = bgCtx.createRadialGradient(lastCursor.x,lastCursor.y,0, lastCursor.x,lastCursor.y, 26);
+    g.addColorStop(0,'rgba(184,58,58,0.18)');
+    g.addColorStop(1,'rgba(184,58,58,0)');
+    bgCtx.fillStyle = g;
+    bgCtx.beginPath(); bgCtx.arc(lastCursor.x,lastCursor.y,26,0,Math.PI*2); bgCtx.fill();
+  }
+
+  bgCtx.restore();
+}
+
+/* ---------- animation loop just for cursor trail / breathing ---------- */
+function loop(){
+  drawBackground();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- init ---------- */
+function init(){
+  resizeBg();
+  applyPan();
+  renderAll();
+  refreshEmpty();
+  requestAnimationFrame(loop);
+}
+
+init();
+</script>
+</body>
+</html>

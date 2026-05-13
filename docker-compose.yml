@@ -1,0 +1,11 @@
+services:
+  stepanka:
+    build: ./server
+    ports:
+      - "3000:3000"
+    volumes:
+      - stepanka_db:/app/data
+    restart: unless-stopped
+
+volumes:
+  stepanka_db:
