@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /* ── token / auth ──────────────────────────────────────────── */
 const TOKEN_KEY = 'stepanka.token';
@@ -119,9 +119,16 @@ window.addEventListener('wheel', e => {
 /* ── pan + pinch (touch) ───────────────────────────────────── */
 let touchPan   = null;
 let pinchState = null;
+let cuttingState   = null;
+let longPressTimer = null;
+let longPressStart = null;
+const LONG_PRESS_CANVAS_MS = 350;
+const LONG_PRESS_CANCEL_PX = 10;
 
 window.addEventListener('touchstart', e => {
   if (e.touches.length === 2) {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null; }
+    cuttingState = null;
     const t0 = e.touches[0], t1 = e.touches[1];
     const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
     const cx   = (t0.clientX + t1.clientX) / 2;
@@ -134,7 +141,16 @@ window.addEventListener('touchstart', e => {
   const t = e.target;
   if (t.closest('.card') || t.closest('.add') || t.closest('#login-screen')) return;
   const tt = e.touches[0];
-  touchPan = { sx: tt.clientX, sy: tt.clientY, ox: state.pan.x, oy: state.pan.y };
+  const sx = tt.clientX, sy = tt.clientY;
+  touchPan = { sx, sy, ox: state.pan.x, oy: state.pan.y };
+  longPressStart = { x: sx, y: sy };
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null;
+    longPressStart = null;
+    touchPan = null;
+    cuttingState = { trail: [] };
+    navigator.vibrate?.(40);
+  }, LONG_PRESS_CANVAS_MS);
 }, { passive: true });
 
 window.addEventListener('touchmove', e => {
@@ -153,6 +169,24 @@ window.addEventListener('touchmove', e => {
     applyTransform();
     return;
   }
+  if (longPressStart && e.touches.length === 1) {
+    const tt = e.touches[0];
+    if (Math.hypot(tt.clientX - longPressStart.x, tt.clientY - longPressStart.y) > LONG_PRESS_CANCEL_PX) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+      longPressStart = null;
+    }
+  }
+  if (cuttingState && e.touches.length === 1) {
+    e.preventDefault();
+    const tt = e.touches[0];
+    const x = tt.clientX, y = tt.clientY;
+    cuttingState.trail.push({ x, y });
+    for (const conn of [...state.connections]) {
+      if (isNearThread(x, y, conn)) cutThread(conn, x, y);
+    }
+    return;
+  }
   if (!touchPan) return;
   const tt = e.touches[0];
   state.pan.x = touchPan.ox + (tt.clientX - touchPan.sx);
@@ -161,8 +195,17 @@ window.addEventListener('touchmove', e => {
 }, { passive: false });
 
 window.addEventListener('touchend', e => {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null; }
+  cuttingState = null;
   if (e.touches.length < 2) pinchState = null;
   if (e.touches.length === 0) touchPan = null;
+});
+
+window.addEventListener('touchcancel', () => {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null; }
+  cuttingState = null;
+  touchPan = null;
+  pinchState = null;
 });
 
 window.addEventListener('mousemove', e => {
@@ -231,6 +274,36 @@ function makeCardEl(card) {
     delBtn.addEventListener('mouseleave', onLeave);
     window.addEventListener('mouseup', onUp);
   });
+
+  let delConfirm = false;
+  let delConfirmCancel = null;
+
+  delBtn.addEventListener('touchend', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!delConfirm) {
+      delConfirm = true;
+      delBtn.classList.add('confirm-delete');
+      const cancelConfirm = ev => {
+        if (ev.target.closest('.del-x') !== delBtn) {
+          delConfirm = false;
+          delBtn.classList.remove('confirm-delete');
+          document.removeEventListener('touchstart', cancelConfirm, true);
+          delConfirmCancel = null;
+        }
+      };
+      delConfirmCancel = cancelConfirm;
+      document.addEventListener('touchstart', cancelConfirm, { capture: true, passive: true });
+    } else {
+      if (delConfirmCancel) {
+        document.removeEventListener('touchstart', delConfirmCancel, true);
+        delConfirmCancel = null;
+      }
+      delConfirm = false;
+      delBtn.classList.remove('confirm-delete');
+      removeCard(card.id);
+    }
+  }, { passive: false });
 
   el.addEventListener('dblclick', e => {
     if (e.target.closest('.del-x')) return;
@@ -661,6 +734,21 @@ function drawThreads() {
       const freeY = end.pivotY + end.L * Math.cos(end.theta);
       drawSaggyThread(end.pivotX, end.pivotY, freeX, freeY, fade);
     }
+  }
+
+  if (cuttingState && cuttingState.trail.length > 1) {
+    fgCtx.save();
+    fgCtx.strokeStyle = 'rgba(184,58,58,0.8)';
+    fgCtx.lineWidth = 2.5;
+    fgCtx.lineCap = 'round';
+    fgCtx.lineJoin = 'round';
+    fgCtx.beginPath();
+    fgCtx.moveTo(cuttingState.trail[0].x, cuttingState.trail[0].y);
+    for (let i = 1; i < cuttingState.trail.length; i++) {
+      fgCtx.lineTo(cuttingState.trail[i].x, cuttingState.trail[i].y);
+    }
+    fgCtx.stroke();
+    fgCtx.restore();
   }
 }
 
