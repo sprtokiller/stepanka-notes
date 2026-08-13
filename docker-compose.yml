@@ -1,8 +1,6 @@
 services:
   stepanka:
     build: ./server
-    ports:
-      - "127.0.0.1:8004:3000"
     volumes:
       - stepanka_db:/app/data
     restart: unless-stopped
